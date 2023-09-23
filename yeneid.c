@@ -545,6 +545,29 @@ yeneid_relation_get_block_sequence(Relation rel,
 {
 	elog(ERROR, "not implemented for yeneid tables");
 }
+
+
+
+/*
+ * Provides an opportunity to create backend-local state to be consulted during
+ * the course of the current DML or DML-like command, for the given relation.
+ */
+static void
+yeneid_dml_init(Relation relation)
+{
+}
+
+
+
+/*
+ * Provides an opportunity to clean up backend-local state set up for the
+ * current DML or DML-like command, for the given relation.
+ */
+static void
+yeneid_dml_finish(Relation relation)
+{
+}
+
 #endif
 
 /* ------------------------------------------------------------------------
@@ -585,6 +608,7 @@ static const TableAmRoutine yeneid_methods = {
 	.tuple_get_latest_tid = yeneid_get_latest_tid,
 	.tuple_tid_valid = yeneid_tuple_tid_valid,
 	.tuple_satisfies_snapshot = yeneid_tuple_satisfies_snapshot,
+
 #if PG_VERSION_NUM < 140000
 	.compute_xid_horizon_for_tuples = yeneid_compute_xid_horizon_for_tuples,
 #endif
@@ -598,6 +622,7 @@ static const TableAmRoutine yeneid_methods = {
 #else
 	.relation_set_new_filenode = yeneid_relation_set_new_relfilenode,
 #endif
+
 	.relation_nontransactional_truncate = yeneid_relation_nontransactional_truncate,
 	.relation_copy_data = yeneid_copy_data,
 	.relation_copy_for_cluster = yeneid_copy_for_cluster,
@@ -608,13 +633,16 @@ static const TableAmRoutine yeneid_methods = {
 	.index_validate_scan = yeneid_index_validate_scan,
 
 	.relation_size = yeneid_relation_size,
+
 #ifdef GP_VERSION_NUM
 	.relation_add_columns = yeneid_relation_add_columns,
 	.relation_rewrite_columns = yeneid_relation_rewrite_columns,
 	.relation_get_block_sequences = yeneid_relation_get_block_sequences,
 	.relation_get_block_sequence = yeneid_relation_get_block_sequence,
-
+	.dml_init = yeneid_dml_init,
+	.dml_finish = yeneid_dml_finish,
 #endif
+
 	.relation_needs_toast_table = yeneid_relation_needs_toast_table,
 
 	.relation_estimate_size = yeneid_estimate_rel_size,
