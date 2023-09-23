@@ -172,12 +172,16 @@ yeneid_tuple_satisfies_snapshot(Relation rel, TupleTableSlot *slot,
 	return false;
 }
 
+#if PG_VERSION_NUM >= 140000
+
 static TransactionId
 yeneid_index_delete_tuples(Relation rel,
 							  TM_IndexDeleteOp *delstate)
 {
 	return InvalidTransactionId;
 }
+
+#endif
 
 /* ----------------------------------------------------------------------------
  *  Functions for manipulations of physical tuples for yeneid AM.
@@ -225,6 +229,8 @@ yeneid_tuple_delete(Relation relation, ItemPointer tid, CommandId cid,
 }
 
 
+#if PG_VERSION_NUM >= 130000
+
 static TM_Result
 yeneid_tuple_update(Relation relation, ItemPointer otid,
 					   TupleTableSlot *slot, CommandId cid,
@@ -236,6 +242,28 @@ yeneid_tuple_update(Relation relation, ItemPointer otid,
 	/* nothing to do, so it is always OK */
 	return TM_Ok;
 }
+
+#else 
+
+/* see table_tuple_update() for reference about parameters */
+static TM_Result 
+yeneid_tuple_update(Relation rel,
+								 ItemPointer otid,
+								 TupleTableSlot *slot,
+								 CommandId cid,
+								 Snapshot snapshot,
+								 Snapshot crosscheck,
+								 bool wait,
+								 TM_FailureData *tmfd,
+								 LockTupleMode *lockmode,
+								 bool *update_indexes) 
+{
+	/* nothing to do, so it is always OK */
+	return TM_Ok;
+}
+
+#endif 
+
 
 static TM_Result
 yeneid_tuple_lock(Relation relation, ItemPointer tid, Snapshot snapshot,
@@ -259,6 +287,7 @@ yeneid_finish_bulk_insert(Relation relation, int options)
  * ------------------------------------------------------------------------
  */
 
+#if PG_VERSION_NUM >= 160000
 static void
 yeneid_relation_set_new_filelocator(Relation rel,
 									   const RelFileLocator *newrnode,
@@ -268,6 +297,19 @@ yeneid_relation_set_new_filelocator(Relation rel,
 {
 	/* nothing to do */
 }
+#else
+
+static void
+yeneid_relation_set_new_relfilenode(Relation rel,
+									 const RelFileNode *newrnode,
+									 char persistence,
+									 TransactionId *freezeXid,
+									 MultiXactId *minmulti)
+{
+	/* nothing to do */
+}
+
+#endif
 
 static void
 yeneid_relation_nontransactional_truncate(Relation rel)
@@ -275,11 +317,23 @@ yeneid_relation_nontransactional_truncate(Relation rel)
 	/* nothing to do */
 }
 
+#if PG_VERSION_NUM >= 160000
+
 static void
 yeneid_copy_data(Relation rel, const RelFileLocator *newrnode)
 {
 	/* there is no data */
 }
+
+#else 
+
+static void
+yeneid_copy_data(Relation rel, const RelFileNode *newrnode)
+{
+	/* there is no data */
+}
+
+#endif
 
 static void
 yeneid_copy_for_cluster(Relation OldTable, Relation NewTable,
@@ -430,6 +484,68 @@ yeneid_scan_sample_next_tuple(TableScanDesc scan,
 	return false;
 }
 
+#if PG_VERSION_NUM < 140000
+static TransactionId
+yeneid_compute_xid_horizon_for_tuples(Relation rel,
+										  ItemPointerData *tids,
+										  int nitems)
+{
+	/*
+	 * This API is only useful for hot standby snapshot conflict resolution
+	 * (for eg. see btree_xlog_delete()), in the context of index page-level
+	 * vacuums (aka page-level cleanups). This operation is only done when
+	 * IndexScanDesc->kill_prior_tuple is true, which is never for AO/CO tables
+	 * (we always return all_dead = false in the index_fetch_tuple() callback
+	 * as we don't support HOT)
+	 */
+	ereport(ERROR,
+			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				errmsg("feature not supported on yeneid relations")));
+}
+#endif
+
+#ifdef GP_VERSION_NUM
+
+
+static void
+yeneid_relation_add_columns(Relation rel, List *newvals, List *constraints, TupleDesc oldDesc)
+{
+	elog(ERROR, "add columns-only not implemented for yeneid tables");
+}
+
+
+static void
+yeneid_relation_rewrite_columns(Relation rel, List *newvals, TupleDesc oldDesc)
+{
+	elog(ERROR, "rewrite columns-only not implemented for yeneid tables");
+}
+
+/*
+ * For each AO segment, get the starting heap block number and the number of
+ * heap blocks (together termed as a BlockSequence). The starting heap block
+ * number is always deterministic given a segment number. See AOtupleId.
+ *
+ * The number of heap blocks can be determined from the last row number present
+ * in the segment. See appendonlytid.h for details.
+ */
+static BlockSequence *
+yeneid_relation_get_block_sequences(Relation rel,
+										int *numSequences)
+{
+	elog(ERROR, "not implemented for yeneid tables");
+}
+/*
+ * Return the BlockSequence corresponding to the AO segment in which the logical
+ * heap block 'blkNum' falls.
+ */
+static void
+yeneid_relation_get_block_sequence(Relation rel,
+									   BlockNumber blkNum,
+									   BlockSequence *sequence)
+{
+	elog(ERROR, "not implemented for yeneid tables");
+}
+#endif
 
 /* ------------------------------------------------------------------------
  * Definition of the yeneid table access method.
@@ -469,9 +585,19 @@ static const TableAmRoutine yeneid_methods = {
 	.tuple_get_latest_tid = yeneid_get_latest_tid,
 	.tuple_tid_valid = yeneid_tuple_tid_valid,
 	.tuple_satisfies_snapshot = yeneid_tuple_satisfies_snapshot,
-	.index_delete_tuples = yeneid_index_delete_tuples,
+#if PG_VERSION_NUM < 140000
+	.compute_xid_horizon_for_tuples = yeneid_compute_xid_horizon_for_tuples,
+#endif
 
+#if PG_VERSION_NUM >= 140000
+	.index_delete_tuples = yeneid_index_delete_tuples,
+#endif
+
+#if PG_VERSION_NUM >= 160000
 	.relation_set_new_filelocator = yeneid_relation_set_new_filelocator,
+#else
+	.relation_set_new_filenode = yeneid_relation_set_new_relfilenode,
+#endif
 	.relation_nontransactional_truncate = yeneid_relation_nontransactional_truncate,
 	.relation_copy_data = yeneid_copy_data,
 	.relation_copy_for_cluster = yeneid_copy_for_cluster,
@@ -482,6 +608,13 @@ static const TableAmRoutine yeneid_methods = {
 	.index_validate_scan = yeneid_index_validate_scan,
 
 	.relation_size = yeneid_relation_size,
+#ifdef GP_VERSION_NUM
+	.relation_add_columns = yeneid_relation_add_columns,
+	.relation_rewrite_columns = yeneid_relation_rewrite_columns,
+	.relation_get_block_sequences = yeneid_relation_get_block_sequences,
+	.relation_get_block_sequence = yeneid_relation_get_block_sequence,
+
+#endif
 	.relation_needs_toast_table = yeneid_relation_needs_toast_table,
 
 	.relation_estimate_size = yeneid_estimate_rel_size,
