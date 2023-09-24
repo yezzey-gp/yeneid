@@ -14,7 +14,7 @@
 #include <vector>
 struct YeneidMetadataState {
   Oid relationOid;
-  std::vector<MemTuple> tuples;
+  std::vector<std::pair<uint32_t, char *>> tuples;
 
   YeneidMetadataState() {}
   YeneidMetadataState(Oid relationOid) : relationOid(relationOid) {}

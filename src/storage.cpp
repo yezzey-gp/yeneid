@@ -46,7 +46,16 @@ void yeneid_tuple_insert_internal(Relation relation, TupleTableSlot *slot,
 
   auto h = get_yeneid_metadata(RelationGetRelid(relation));
 
-  h->tuples.push_back(memtup);
+  /*
+   * get space to insert our next item (tuple)
+   */
+  auto itemLen = memtuple_get_size(memtup);
+
+  char *ptr = (char *)malloc(itemLen);
+
+  memcpy(ptr, memtup, itemLen);
+
+  h->tuples.push_back({itemLen, ptr});
 
   pfree(memtup);
   pfree(mt_bind);
@@ -69,7 +78,7 @@ bool yeneid_scan_getnextslot_internal(YeneidScanDesc scan,
     auto mt_bind = create_memtuple_binding(
         RelationGetDescr(relation), RelationGetNumberOfAttributes(relation));
 
-    memtuple_deform(h->tuples[scan->currtup], mt_bind, slot->tts_values,
+    memtuple_deform((MemTuple)h->tuples[scan->currtup].second, mt_bind, slot->tts_values,
                     slot->tts_isnull);
     slot->tts_tid = fake_ctid;
     ExecStoreVirtualTuple(slot);
