@@ -23,21 +23,13 @@
 #include "commands/vacuum.h"
 #include "executor/tuptable.h"
 
+#include "yeneid.h"
+
 PG_MODULE_MAGIC;
 
 PG_FUNCTION_INFO_V1(yeneid_handler);
 
-/* Base structures for scans */
-typedef struct BlackholeScanDescData
-{
-	TableScanDescData rs_base;	/* AM independent part of the descriptor */
-
-	/* Add more fields here as needed by the AM. */
-}			BlackholeScanDescData;
-typedef struct BlackholeScanDescData *BlackholeScanDesc;
-
 static const TableAmRoutine yeneid_methods;
-
 
 /* ------------------------------------------------------------------------
  * Slot related callbacks for yeneid AM
@@ -65,9 +57,9 @@ yeneid_scan_begin(Relation relation, Snapshot snapshot,
 					 ParallelTableScanDesc parallel_scan,
 					 uint32 flags)
 {
-	BlackholeScanDesc scan;
+	YeneidScanDesc scan;
 
-	scan = (BlackholeScanDesc) palloc(sizeof(BlackholeScanDescData));
+	scan = (YeneidScanDesc) palloc(sizeof(YeneidScanDescData));
 
 	scan->rs_base.rs_rd = relation;
 	scan->rs_base.rs_snapshot = snapshot;
@@ -75,13 +67,15 @@ yeneid_scan_begin(Relation relation, Snapshot snapshot,
 	scan->rs_base.rs_flags = flags;
 	scan->rs_base.rs_parallel = parallel_scan;
 
+	scan->currtup = 0;
+
 	return (TableScanDesc) scan;
 }
 
 static void
 yeneid_scan_end(TableScanDesc sscan)
 {
-	BlackholeScanDesc scan = (BlackholeScanDesc) sscan;
+	YeneidScanDesc scan = (YeneidScanDesc) sscan;
 
 	pfree(scan);
 }
@@ -98,7 +92,7 @@ yeneid_scan_getnextslot(TableScanDesc sscan, ScanDirection direction,
 						   TupleTableSlot *slot)
 {
 	/* nothing to do */
-	return false;
+	return yeneid_scan_getnextslot_internal((YeneidScanDesc)sscan, direction, slot);
 }
 
 /* ------------------------------------------------------------------------
@@ -193,6 +187,8 @@ yeneid_tuple_insert(Relation relation, TupleTableSlot *slot,
 					   CommandId cid, int options, BulkInsertState bistate)
 {
 	/* nothing to do */
+
+	(void)yeneid_tuple_insert_internal(relation, slot, cid, options, bistate);	
 }
 
 static void
@@ -546,8 +542,6 @@ yeneid_relation_get_block_sequence(Relation rel,
 	elog(ERROR, "not implemented for yeneid tables");
 }
 
-
-
 /*
  * Provides an opportunity to create backend-local state to be consulted during
  * the course of the current DML or DML-like command, for the given relation.
@@ -556,7 +550,6 @@ static void
 yeneid_dml_init(Relation relation)
 {
 }
-
 
 
 /*
