@@ -47,8 +47,6 @@ extern "C" {
 #include "pgstat.h"
 #include "utils/builtins.h"
 
-#include "access/aocssegfiles.h"
-#include "access/aosegfiles.h"
 #include "storage/lmgr.h"
 #if GP_VERSION_NUM < 70000
 #include "utils/tqual.h"
