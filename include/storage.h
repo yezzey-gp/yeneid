@@ -12,12 +12,23 @@
 #include <map>
 #include <unordered_map>
 #include <vector>
+
+#include <fstream>
+
 struct YeneidMetadataState {
   Oid relationOid;
-  std::vector<std::pair<uint32_t, char *>> tuples;
+  int fd{-1};
+  int logicaleof;
+
+  std::ifstream is;
+
+  std::ofstream os;
 
   YeneidMetadataState() {}
-  YeneidMetadataState(Oid relationOid) : relationOid(relationOid) {}
+  YeneidMetadataState(Oid relationOid) : relationOid(relationOid), is("yeneid_table"), os("yeneid_table",  std::ios::binary) {
+  }
+
+protected:
 };
 
 #endif

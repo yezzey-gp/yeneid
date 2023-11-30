@@ -55,15 +55,13 @@ static TableScanDesc yeneid_scan_begin(Relation relation, Snapshot snapshot,
                                        uint32 flags) {
   YeneidScanDesc scan;
 
-  scan = (YeneidScanDesc)palloc(sizeof(YeneidScanDescData));
+  scan = (YeneidScanDesc)palloc0(sizeof(YeneidScanDescData));
 
   scan->rs_base.rs_rd = relation;
   scan->rs_base.rs_snapshot = snapshot;
   scan->rs_base.rs_nkeys = nkeys;
   scan->rs_base.rs_flags = flags;
   scan->rs_base.rs_parallel = parallel_scan;
-
-  scan->currtup = 0;
 
   return (TableScanDesc)scan;
 }
