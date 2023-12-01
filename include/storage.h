@@ -22,12 +22,15 @@ struct YeneidMetadataState {
 
   SMgrRelation smgr;
 
-
   int npagecnt;
 
+  char buf[BLCKSZ];
+
+  char * tuple_place_ptr;
 
   YeneidMetadataState() {}
-  YeneidMetadataState(Oid relationOid, SMgrRelation smgr) : relationOid(relationOid), smgr(smgr) {
+  YeneidMetadataState(Oid relationOid, SMgrRelation smgr):
+   relationOid(relationOid), smgr(smgr), tuple_place_ptr(nullptr) {
     npagecnt = smgrnblocks(smgr, MAIN_FORKNUM);
   }
 
@@ -55,5 +58,9 @@ yeneid_relation_set_new_relfilenode_internal(Relation rel,
 								 char persistence,
 								 TransactionId *freezeXid,
 								 MultiXactId *minmulti);
+
+EXTERNC void yeneid_dml_init_internal(Relation relation);
+
+EXTERNC void yeneid_dml_finish_internal(Relation relation);
 
 #endif /* YENEID_STORAGE_H */
