@@ -63,6 +63,8 @@ static TableScanDesc yeneid_scan_begin(Relation relation, Snapshot snapshot,
   scan->rs_base.rs_flags = flags;
   scan->rs_base.rs_parallel = parallel_scan;
 
+  yeneid_scan_init(scan);
+
   return (TableScanDesc)scan;
 }
 

@@ -21,9 +21,10 @@ typedef struct YeneidScanDescData {
   /* Add more fields here as needed by the AM. */
 
   int currtup;
-
   int curreof;
 
+  // field of type YeneidMetadataState*
+  void * YeneidMetadataState;
 } YeneidScanDescData;
 typedef struct YeneidScanDescData *YeneidScanDesc;
 
