@@ -441,13 +441,17 @@ static void yeneid_relation_get_block_sequence(Relation rel, BlockNumber blkNum,
  * Provides an opportunity to create backend-local state to be consulted during
  * the course of the current DML or DML-like command, for the given relation.
  */
-static void yeneid_dml_init(Relation relation) {}
+static void yeneid_dml_init(Relation relation) {
+  yeneid_dml_init_internal(relation);
+}
 
 /*
  * Provides an opportunity to clean up backend-local state set up for the
  * current DML or DML-like command, for the given relation.
  */
-static void yeneid_dml_finish(Relation relation) {}
+static void yeneid_dml_finish(Relation relation) {
+  yeneid_dml_finish_internal(relation);
+}
 
 #endif
 

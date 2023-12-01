@@ -27,17 +27,19 @@ MemTuple yeneid_form_memtuple(TupleTableSlot *slot, MemTupleBinding *mt_bind) {
  * Retrieve the state information for a relation.
  * It is required that the state has been created before hand.
  */
-YeneidMetadataState *get_yeneid_metadata(const Oid relationOid) {
-  static std::unordered_map<Oid, YeneidMetadataState> cache_;
-  if (!cache_.count(relationOid)) {
-    // cache_[relationOid] = YeneidMetadataState(relationOid);
-  }
 
+static std::unordered_map<Oid, YeneidMetadataState> cache_;
+YeneidMetadataState *get_yeneid_metadata(const Oid relationOid) {
   return &cache_[relationOid];
 }
 
-static int get_tuple_len(char * buf) {
-  return (1 << 24) * buf[0] + (1 << 16) * buf[1] + (1 << 8) * buf[2] + buf[3];
+
+void init_yeneid_metadata(const Oid relationOid, SMgrRelation smgr) {
+   cache_[relationOid] = YeneidMetadataState(relationOid, smgr);
+}
+
+void cleanup_yeneid_metadata(const Oid relationOid) {
+   cache_.erase(relationOid);
 }
 
 char * yeneid_get_page_insert_ptr(char * buf, int page_size, int sz) {
@@ -45,15 +47,18 @@ char * yeneid_get_page_insert_ptr(char * buf, int page_size, int sz) {
   char * end_page_ptr = buf + page_size;
 
   while (1) {
-    if (curr_ptr + 4 + sz > end_page_ptr) {
+    if (curr_ptr + 4 > end_page_ptr) {
       // failed to plase tuple on page
       break;
     }
-    int nsz = get_tuple_len(curr_ptr);
+    if (!memtuple_lead_bit_set((MemTuple)curr_ptr)) {
+      return curr_ptr;
+    }
+    int nsz = memtuple_get_size((MemTuple)curr_ptr);
     if (nsz == 0) {
       return curr_ptr;
     }
-    curr_ptr += 4 + nsz;
+    curr_ptr += nsz;
   }
 
   return nullptr;
@@ -67,46 +72,38 @@ void yeneid_tuple_insert_internal(Relation relation, TupleTableSlot *slot,
       RelationGetDescr(relation), RelationGetNumberOfAttributes(relation));
   auto memtup = yeneid_form_memtuple(slot, mt_bind);
 
-
-  RelationOpenSmgr(relation);
-  auto h = YeneidMetadataState(RelationGetRelid(relation), relation->rd_smgr);
+  auto h = get_yeneid_metadata(RelationGetRelid(relation));
 
   /*
    * get space to insert our next item (tuple)
    */
   auto itemLen = memtuple_get_size(memtup);
 
-  auto nblock = smgrnblocks(h.smgr, MAIN_FORKNUM);
 
-  char buf[BLCKSZ];
-
-  char *tuple_place_ptr = nullptr;
-
-  if (nblock > 0) {
-    smgrread(h.smgr, MAIN_FORKNUM, nblock - 1, buf);
-    // search for place for tuple
-    tuple_place_ptr = yeneid_get_page_insert_ptr(buf, BLCKSZ, itemLen);
+  if (h->tuple_place_ptr == nullptr) {
+    if (h->npagecnt == 0) {
+      memset(h->buf, 0, sizeof h->buf);
+      smgrextend(h->smgr, MAIN_FORKNUM, 0, h->buf, false);
+      h->tuple_place_ptr = h->buf;
+    } else {
+      smgrread(h->smgr, MAIN_FORKNUM, h->npagecnt  - 1, h->buf);
+      // search for place for tuple
+      h->tuple_place_ptr = yeneid_get_page_insert_ptr(h->buf, BLCKSZ, itemLen);
+    }
   }
 
-  if (tuple_place_ptr == nullptr) {
-    ++nblock;
-    memset(buf, 0, sizeof buf);
-    tuple_place_ptr = buf;
+  if (h->tuple_place_ptr + itemLen > h->buf + BLCKSZ) {
+    if (h->npagecnt) {
+      smgrwrite(h->smgr, MAIN_FORKNUM,  h->npagecnt  - 1, h->buf, false);
+    }
 
-    char bufsz[4] = {itemLen >> 24, (itemLen >> 16) & ((1 << 8) - 1), (itemLen >> 8) & ((1 << 8) - 1), itemLen & ((1 << 8) - 1)};
-    memcpy(tuple_place_ptr, bufsz, 4);
-    tuple_place_ptr += 4;
-    memcpy(tuple_place_ptr,(char*)memtup, itemLen);
-
-    smgrextend(h.smgr, MAIN_FORKNUM, nblock - 1, buf, false);
-  } else {
-    char bufsz[4] = {itemLen >> 24, (itemLen >> 16) & ((1 << 8) - 1), (itemLen >> 8) & ((1 << 8) - 1), itemLen & ((1 << 8) - 1)};
-    memcpy(tuple_place_ptr, bufsz, 4);
-    tuple_place_ptr += 4;
-    memcpy(tuple_place_ptr,(char*)memtup, itemLen);
-
-    smgrwrite(h.smgr, MAIN_FORKNUM, nblock - 1, buf, false);
+    ++h->npagecnt;
+    memset(h->buf, 0, sizeof h->buf);
+    h->tuple_place_ptr = h->buf;
   }
+
+  memcpy(h->tuple_place_ptr,(char*)memtup, itemLen);
+  h->tuple_place_ptr += itemLen;
 
   pfree(memtup);
   pfree(mt_bind);
@@ -140,12 +137,11 @@ bool yeneid_scan_getnextslot_internal(YeneidScanDesc scan,
       continue;
     }
 
-    int sz = get_tuple_len(scan->page_ptr);
-    if (sz == 0) {
+    if (!memtuple_lead_bit_set((MemTuple)(scan->page_ptr))) {
       return false;
     }
-    scan->page_ptr += 4;
 
+    int sz = memtuple_get_size((MemTuple)(scan->page_ptr));
 
     auto mt_bind = create_memtuple_binding(
         RelationGetDescr(relation), RelationGetNumberOfAttributes(relation));
@@ -212,4 +208,20 @@ yeneid_relation_set_new_relfilenode_internal(Relation rel,
 	srel = RelationCreateStorage(*newrnode, persistence, SMGR_MD);
 
 	smgrclose(srel);
+}
+
+
+void yeneid_dml_init_internal(Relation relation) {
+  RelationOpenSmgr(relation);
+  init_yeneid_metadata(RelationGetRelid(relation), relation->rd_smgr);
+}
+
+
+void yeneid_dml_finish_internal(Relation relation) {
+  auto h = get_yeneid_metadata(RelationGetRelid(relation));
+  if (h->npagecnt) {
+    smgrwrite(h->smgr, MAIN_FORKNUM,  h->npagecnt - 1, h->buf, false);
+  }
+
+  cleanup_yeneid_metadata(RelationGetRelid(relation));
 }
