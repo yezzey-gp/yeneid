@@ -178,7 +178,8 @@ static void yeneid_tuple_complete_speculative(Relation relation,
 static void yeneid_multi_insert(Relation relation, TupleTableSlot **slots,
                                 int ntuples, CommandId cid, int options,
                                 BulkInsertState bistate) {
-  /* nothing to do */
+	for (int i = 0; i < ntuples; i++)
+		yeneid_tuple_insert_internal(relation, slots[i], cid, options, bistate);
 }
 
 static TM_Result yeneid_tuple_delete(Relation relation, ItemPointer tid,
@@ -249,7 +250,7 @@ static void yeneid_relation_set_new_relfilenode(Relation rel,
                                                 char persistence,
                                                 TransactionId *freezeXid,
                                                 MultiXactId *minmulti) {
-  /* nothing to do */
+  yeneid_relation_set_new_relfilenode_internal(rel, newrnode, persistence, freezeXid, minmulti);
 }
 
 #endif
