@@ -20,14 +20,15 @@ struct YeneidMetadataState {
   int fd{-1};
   int logicaleof;
 
-  std::ifstream is;
+  SMgrRelation smgr;
 
-  std::ofstream os;
+
+  int npagecnt;
+
 
   YeneidMetadataState() {}
-  YeneidMetadataState(Oid relationOid) : relationOid(relationOid), is("yeneid_table"), os("yeneid_table",  std::ios::binary |  std::fstream::app) {
-    is.seekg(0, std::ios::beg);
-    os.seekp(0, std::ios::end);
+  YeneidMetadataState(Oid relationOid, SMgrRelation smgr) : relationOid(relationOid), smgr(smgr) {
+    npagecnt = smgrnblocks(smgr, MAIN_FORKNUM);
   }
 
 protected:
@@ -47,5 +48,12 @@ EXTERNC void yeneid_tuple_insert_internal(Relation relation,
 EXTERNC void yeneid_scan_cleanup_internal(YeneidScanDesc scan);
 
 EXTERNC void yeneid_scan_init(YeneidScanDesc scan);
+
+EXTERNC void
+yeneid_relation_set_new_relfilenode_internal(Relation rel,
+								 const RelFileNode *newrnode,
+								 char persistence,
+								 TransactionId *freezeXid,
+								 MultiXactId *minmulti);
 
 #endif /* YENEID_STORAGE_H */

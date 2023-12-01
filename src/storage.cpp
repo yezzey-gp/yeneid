@@ -30,10 +30,33 @@ MemTuple yeneid_form_memtuple(TupleTableSlot *slot, MemTupleBinding *mt_bind) {
 YeneidMetadataState *get_yeneid_metadata(const Oid relationOid) {
   static std::unordered_map<Oid, YeneidMetadataState> cache_;
   if (!cache_.count(relationOid)) {
-    cache_[relationOid] = YeneidMetadataState(relationOid);
+    // cache_[relationOid] = YeneidMetadataState(relationOid);
   }
 
   return &cache_[relationOid];
+}
+
+static int get_tuple_len(char * buf) {
+  return (1 << 24) * buf[0] + (1 << 16) * buf[1] + (1 << 8) * buf[2] + buf[3];
+}
+
+char * yeneid_get_page_insert_ptr(char * buf, int page_size, int sz) {
+  char * curr_ptr = buf;
+  char * end_page_ptr = buf + page_size;
+
+  while (1) {
+    if (curr_ptr + 4 + sz > end_page_ptr) {
+      // failed to plase tuple on page
+      break;
+    }
+    int nsz = get_tuple_len(curr_ptr);
+    if (nsz == 0) {
+      return curr_ptr;
+    }
+    curr_ptr += 4 + nsz;
+  }
+
+  return nullptr;
 }
 
 void yeneid_tuple_insert_internal(Relation relation, TupleTableSlot *slot,
@@ -44,19 +67,46 @@ void yeneid_tuple_insert_internal(Relation relation, TupleTableSlot *slot,
       RelationGetDescr(relation), RelationGetNumberOfAttributes(relation));
   auto memtup = yeneid_form_memtuple(slot, mt_bind);
 
-  auto h = YeneidMetadataState(RelationGetRelid(relation));
+
+  RelationOpenSmgr(relation);
+  auto h = YeneidMetadataState(RelationGetRelid(relation), relation->rd_smgr);
 
   /*
    * get space to insert our next item (tuple)
    */
   auto itemLen = memtuple_get_size(memtup);
 
-  h.os.seekp(0, std::ios::end);
-  char buf[4] = {itemLen >> 24, (itemLen >> 16) & ((1 << 8) - 1), (itemLen >> 8) & ((1 << 8) - 1), itemLen & ((1 << 8) - 1)};
-  h.os.write(buf, 4);
-  h.os.write((char*)memtup, itemLen);
-  elog(DEBUG5, "write up to %d bytes", h.os.tellp());
-  h.os.flush();
+  auto nblock = smgrnblocks(h.smgr, MAIN_FORKNUM);
+
+  char buf[BLCKSZ];
+
+  char *tuple_place_ptr = nullptr;
+
+  if (nblock > 0) {
+    smgrread(h.smgr, MAIN_FORKNUM, nblock - 1, buf);
+    // search for place for tuple
+    tuple_place_ptr = yeneid_get_page_insert_ptr(buf, BLCKSZ, itemLen);
+  }
+
+  if (tuple_place_ptr == nullptr) {
+    ++nblock;
+    memset(buf, 0, sizeof buf);
+    tuple_place_ptr = buf;
+
+    char bufsz[4] = {itemLen >> 24, (itemLen >> 16) & ((1 << 8) - 1), (itemLen >> 8) & ((1 << 8) - 1), itemLen & ((1 << 8) - 1)};
+    memcpy(tuple_place_ptr, bufsz, 4);
+    tuple_place_ptr += 4;
+    memcpy(tuple_place_ptr,(char*)memtup, itemLen);
+
+    smgrextend(h.smgr, MAIN_FORKNUM, nblock - 1, buf, false);
+  } else {
+    char bufsz[4] = {itemLen >> 24, (itemLen >> 16) & ((1 << 8) - 1), (itemLen >> 8) & ((1 << 8) - 1), itemLen & ((1 << 8) - 1)};
+    memcpy(tuple_place_ptr, bufsz, 4);
+    tuple_place_ptr += 4;
+    memcpy(tuple_place_ptr,(char*)memtup, itemLen);
+
+    smgrwrite(h.smgr, MAIN_FORKNUM, nblock - 1, buf, false);
+  }
 
   pfree(memtup);
   pfree(mt_bind);
@@ -72,49 +122,44 @@ bool yeneid_scan_getnextslot_internal(YeneidScanDesc scan,
   auto relation = scan->rs_base.rs_rd;
   YeneidMetadataState * h = (YeneidMetadataState *)(scan-> YeneidMetadataState);
 
-  if (!h->is.eof()) {
-    ItemPointerData fake_ctid;
-    ExecClearTuple(slot);
+  ItemPointerData fake_ctid;
+  ExecClearTuple(slot);
 
-    char buf[4];
 
-    h->is.read(buf, sizeof buf);
-
-    elog(DEBUG5, "read next %d bytes", h->is.gcount());
-
-    if (h->is.gcount() < sizeof buf) {
-      return false;
+  while (1) {
+    if (scan->page_ptr == nullptr) {
+      if (scan->current_block == h->npagecnt) {
+        break;
+      }
+      smgrread(h->smgr, MAIN_FORKNUM, scan->current_block ++, scan->buf);
+      scan->page_ptr = scan->buf;
     }
 
-    scan->curreof += 4;
-
-    int sz = (1 << 24) * buf[0] + (1 << 16) * buf[1] + (1 << 8) * buf[2] + buf[3];
-
-    char bufbody[sz];
-
-    h->is.read(bufbody, sizeof bufbody);
-    elog(DEBUG5, "read next %d bytes", h->is.gcount());
-
-    if (h->is.gcount() < sz) {
-      return false;
+    if (scan->page_ptr + 4 > scan->buf + BLCKSZ) {
+      scan->page_ptr == nullptr;
+      continue;
     }
 
-    scan->curreof += sz;
+    int sz = get_tuple_len(scan->page_ptr);
+    if (sz == 0) {
+      return false;
+    }
+    scan->page_ptr += 4;
+
 
     auto mt_bind = create_memtuple_binding(
         RelationGetDescr(relation), RelationGetNumberOfAttributes(relation));
 
-    memtuple_deform((MemTuple)bufbody, mt_bind, slot->tts_values,
+    memtuple_deform((MemTuple)(scan->page_ptr), mt_bind, slot->tts_values,
                     slot->tts_isnull);
     slot->tts_tid = fake_ctid;
     ExecStoreVirtualTuple(slot);
 
     pfree(mt_bind);
-    scan->currtup++;
+
+    scan->page_ptr += sz;
+
     return true;
-  }
-  if (slot) {
-    ExecClearTuple(slot);
   }
 
   return false;
@@ -126,5 +171,45 @@ void yeneid_scan_cleanup_internal(YeneidScanDesc scan) {
 }
 
 void yeneid_scan_init(YeneidScanDesc scan) {
- scan-> YeneidMetadataState = new YeneidMetadataState(RelationGetRelid(scan->rs_base.rs_rd));
+  RelationOpenSmgr(scan->rs_base.rs_rd);
+  scan-> YeneidMetadataState = new YeneidMetadataState(RelationGetRelid(scan->rs_base.rs_rd), scan->rs_base.rs_rd->rd_smgr);
+}
+
+
+
+
+/* ------------------------------------------------------------------------
+ * DDL related callbacks for heap AM.
+ * ------------------------------------------------------------------------
+ */
+
+void
+yeneid_relation_set_new_relfilenode_internal(Relation rel,
+								 const RelFileNode *newrnode,
+								 char persistence,
+								 TransactionId *freezeXid,
+								 MultiXactId *minmulti)
+{
+	SMgrRelation srel;
+
+	/*
+	 * Initialize to the minimum XID that could put tuples in the table. We
+	 * know that no xacts older than RecentXmin are still running, so that
+	 * will do.
+	 */
+	*freezeXid = RecentXmin;
+
+	/*
+	 * Similarly, initialize the minimum Multixact to the first value that
+	 * could possibly be stored in tuples in the table.  Running transactions
+	 * could reuse values from their local cache, so we are careful to
+	 * consider all currently running multis.
+	 *
+	 * XXX this could be refined further, but is it worth the hassle?
+	 */
+	*minmulti = GetOldestMultiXactId();
+
+	srel = RelationCreateStorage(*newrnode, persistence, SMGR_MD);
+
+	smgrclose(srel);
 }

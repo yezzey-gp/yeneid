@@ -20,8 +20,10 @@ typedef struct YeneidScanDescData {
 
   /* Add more fields here as needed by the AM. */
 
-  int currtup;
-  int curreof;
+  int current_block;
+  char * page_ptr;
+
+  char buf[BLCKSZ];
 
   // field of type YeneidMetadataState*
   void * YeneidMetadataState;
