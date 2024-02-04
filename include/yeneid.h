@@ -4,7 +4,7 @@
 #include "pg.h"
 
 #include "externc.h"
-#include "storage.h"
+#include "ystorage.h"
 #include "yscan.h"
 
 #endif /* YENEID_YENEID_H */

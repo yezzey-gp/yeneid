@@ -12,3 +12,17 @@ LANGUAGE C;
 CREATE ACCESS METHOD yeneid TYPE TABLE HANDLER yeneid_handler;
 COMMENT ON ACCESS METHOD yeneid IS 'table AM for Yezzey';
 
+
+CREATE OR REPLACE FUNCTION yeneid_define_relation_offload_policy_internal(reloid OID) RETURNS void
+AS 'MODULE_PATHNAME'
+VOLATILE
+EXECUTE ON COORDINATOR
+LANGUAGE C STRICT;
+
+
+CREATE OR REPLACE FUNCTION yeneid_define_relation_offload_policy_internal_seg(reloid OID) RETURNS void
+AS 'MODULE_PATHNAME'
+VOLATILE
+EXECUTE ON ALL SEGMENTS
+LANGUAGE C STRICT;
+

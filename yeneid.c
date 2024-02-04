@@ -25,9 +25,15 @@
 
 #include "yeneid.h"
 
+#include "virt_tablespace.h"
+
 PG_MODULE_MAGIC;
 
 PG_FUNCTION_INFO_V1(yeneid_handler);
+
+PG_FUNCTION_INFO_V1(yeneid_define_relation_offload_policy_internal);
+PG_FUNCTION_INFO_V1(yeneid_define_relation_offload_policy_internal_seg);
+
 
 static const TableAmRoutine yeneid_methods;
 
@@ -539,3 +545,16 @@ static const TableAmRoutine yeneid_methods = {
     .scan_sample_next_tuple = yeneid_scan_sample_next_tuple};
 
 Datum yeneid_handler(PG_FUNCTION_ARGS) { PG_RETURN_POINTER(&yeneid_methods); }
+
+
+
+Datum yeneid_define_relation_offload_policy_internal(PG_FUNCTION_ARGS) {
+  (void)YeneidDefineOffloadPolicy(PG_GETARG_OID(0));
+  PG_RETURN_VOID();
+}
+
+
+Datum yeneid_define_relation_offload_policy_internal_seg(PG_FUNCTION_ARGS) {
+  (void)YeneidDefineOffloadPolicy(PG_GETARG_OID(0));
+  PG_RETURN_VOID();
+}

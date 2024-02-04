@@ -12,12 +12,23 @@ extern "C" {
 #include "postmaster/interrupt.h"
 #endif
 
+#if PG_VERSION_NUM >= 120000
+#include "access/table.h"
+#endif
+
+#include "catalog/yezzey_distrib.h"
+
+#include "access/relation.h"
+
 #include "utils/timestamp.h"
 #if PG_VERSION_NUM >= 100000
 #include "common/file_perm.h"
 #else
-#include "access/xact.h"
 #endif
+
+#include "storage/bufmgr.h"
+
+#include "access/xact.h"
 
 #include "utils/elog.h"
 

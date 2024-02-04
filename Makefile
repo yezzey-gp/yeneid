@@ -21,6 +21,7 @@ MODULE_big = yeneid
 OBJS = \
 	$(WIN32RES) \
 	src/storage.o \
+	src/virt_tablespace.o \
 	yeneid.o
 
 EXTENSION = yeneid
